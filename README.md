@@ -25,7 +25,8 @@ every endpoint against the live server:
 
 - **Create a short link** — destination, optional alias, optional TTL. On success
   it shows the short URL, a scannable QR code, and copy / open actions.
-- **Your links** — every link with live click counts; per-row stats and delete.
+- **Your links** — every link with live click counts. *Stats* expands under that
+  row with a 7-day click chart and referrer breakdown; click again to collapse.
 - **Guided checks** — seven one-click probes. Each names the status code it
   expects *before* it runs, then shows PASS/FAIL plus the raw response body.
   They assert the same things the pytest suite does, so a reviewer can confirm

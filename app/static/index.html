@@ -71,6 +71,30 @@
   .clicks{font-variant-numeric:tabular-nums;font-weight:600}
   .empty{padding:34px 22px;text-align:center;color:var(--slate);font-size:13.5px}
 
+  /* stats expand under their own row */
+  tr.detail td{padding:0;border-bottom:1px solid var(--line);background:var(--mist)}
+  .detail-body{padding:16px 22px}
+  .detail-top{display:flex;align-items:baseline;gap:10px;margin-bottom:14px}
+  .detail-top b{font-family:var(--mono);color:var(--navy);font-size:13.5px}
+  .detail-top span{font-size:12.5px;color:var(--slate)}
+  .detail-grid{display:grid;grid-template-columns:1fr 220px;gap:26px}
+  .detail-grid>*{min-width:0}
+  @media(max-width:700px){.detail-grid{grid-template-columns:1fr;gap:18px}}
+  .detail-h{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--slate);font-weight:700;margin-bottom:9px}
+  .chart{display:flex;align-items:flex-end;gap:7px;height:72px}
+  .cbar{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%;min-width:0}
+  .cbar-fill{width:100%;max-width:38px;background:var(--blue);border-radius:3px 3px 0 0}
+  .cbar:hover .cbar-fill{background:var(--navy-2)}
+  .cbar-label{font-family:var(--mono);font-size:10px;color:var(--slate);margin-top:5px;white-space:nowrap}
+  .refs{list-style:none;font-size:12.5px}
+  .refs li{display:flex;justify-content:space-between;gap:12px;padding:5px 0;border-bottom:1px solid var(--line)}
+  .refs li:last-child{border-bottom:0}
+  .refs span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--slate)}
+  .refs b{font-variant-numeric:tabular-nums;color:var(--ink)}
+  .nodata{font-size:12.5px;color:var(--slate)}
+  .detail-err{font-size:13px;color:var(--red);font-weight:500}
+  button.open{border-color:var(--blue);color:var(--blue)}
+
   .statbox{margin:0 22px 16px;background:var(--mist);border-radius:8px;padding:14px 16px;font-size:13px;display:none}
   .statbox.show{display:block}
   .statbox b{font-weight:700}
@@ -261,7 +285,7 @@ async function loadLinks(){
         <td><span class="url" title="${esc(l.url)}">${esc(l.url)}</span></td>
         <td class="clicks">${l.clicks}</td>
         <td style="color:var(--slate)">${l.expires_at ? esc(l.expires_at.slice(0,10)) : '—'}</td>
-        <td><button class="btn ghost" onclick="showStats('${esc(l.code)}')">Stats</button>
+        <td><button class="btn ghost" onclick="showStats('${esc(l.code)}', this)">Stats</button>
             <button class="btn ghost" onclick="delLink('${esc(l.code)}')">Delete</button></td>
       </tr>`).join('') : EMPTY_ROW;
   } catch (e) {
@@ -269,15 +293,51 @@ async function loadLinks(){
   }
 }
 
-async function showStats(code){
+/* Stats expand directly beneath their own row — a panel elsewhere on the page
+   makes the reader work out which link it belongs to. */
+function closeDetail(){
+  document.querySelectorAll('#rows tr.detail').forEach(tr=>tr.remove());
+  document.querySelectorAll('#rows button.open').forEach(b=>{ b.classList.remove('open'); b.textContent='Stats'; });
+}
+
+function statsPanel(s){
+  const week = s.last_7_days;
+  if (!week.length) return '<div class="nodata">No clicks yet. Open the short link, then check again.</div>';
+  const peak = Math.max(...week.map(d=>d.clicks));
+  const bars = week.map(d=>`
+    <div class="cbar" title="${esc(d.day)}: ${d.clicks} click${d.clicks===1?'':'s'}">
+      <div class="cbar-fill" style="height:${Math.max(6, Math.round(d.clicks/peak*100))}%"></div>
+      <div class="cbar-label">${esc(d.day.slice(5))}</div>
+    </div>`).join('');
+  const refs = s.top_referrers.length
+    ? s.top_referrers.map(r=>`<li><span>${esc(r.referrer)}</span><b>${r.clicks}</b></li>`).join('')
+    : '<li><span>none recorded</span><b>0</b></li>';
+  return `<div class="detail-grid">
+      <div><div class="detail-h">Clicks, last 7 days</div><div class="chart">${bars}</div></div>
+      <div><div class="detail-h">Top referrers</div><ul class="refs">${refs}</ul></div>
+    </div>`;
+}
+
+async function showStats(code, btn){
+  const row = btn.closest('tr');
+  const wasOpen = btn.classList.contains('open');
+  closeDetail();
+  if (wasOpen) return;                       // second click closes it
+
+  btn.classList.add('open'); btn.textContent = 'Hide';
+  const detail = document.createElement('tr');
+  detail.className = 'detail';
+  detail.innerHTML = '<td colspan="5"><div class="detail-body">Loading…</div></td>';
+  row.after(detail);
+
   try {
     const s = await getJSON(`/api/links/${encodeURIComponent(code)}/stats`);
-    const days = s.last_7_days.map(d=>`${d.day}: ${d.clicks}`).join('  ·  ') || 'no clicks in last 7 days';
-    const refs = s.top_referrers.map(r=>`${esc(r.referrer)} (${r.clicks})`).join(', ') || '—';
-    showMessage(`<b>/${esc(code)}</b> — ${s.total_clicks} total click${s.total_clicks===1?'':'s'}<br>
-      <span class="mono">7-day: ${esc(days)}</span><br><span class="mono">referrers: ${refs}</span>`, false);
+    detail.querySelector('.detail-body').innerHTML =
+      `<div class="detail-top"><b>/${esc(code)}</b><span>${s.total_clicks} total click${s.total_clicks===1?'':'s'}</span></div>`
+      + statsPanel(s);
   } catch (e) {
-    showMessage(`<b>/${esc(code)}</b> — ${esc(e.message)}`, true);
+    detail.querySelector('.detail-body').innerHTML =
+      `<div class="detail-err">${esc(e.message)}</div>`;
     loadLinks();   // the row was stale; refresh so it disappears
   }
 }
@@ -285,10 +345,10 @@ async function showStats(code){
 async function delLink(code){
   try {
     await getJSON(`/api/links/${encodeURIComponent(code)}`, {method:'DELETE'});
-    $('statbox').classList.remove('show');
   } catch (e) {
     showMessage(`<b>/${esc(code)}</b> — ${esc(e.message)}`, true);
   }
+  closeDetail();
   loadLinks();
 }
 loadLinks();
