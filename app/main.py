@@ -76,12 +76,20 @@ def shorten(body: ShortenRequest, request: Request):
 
 
 @app.get("/{code}")
-def redirect(code: str):
+def redirect(code: str, request: Request):
     row = db.get_link(code)
     if row is None or _expired(row):
         raise HTTPException(404, "Unknown or expired link")
+    db.record_click(code, request.headers.get("referer"))
     # 307 keeps method + avoids permanent browser caching (lets us expire/delete later)
     return RedirectResponse(row["url"], status_code=307)
+
+
+@app.get("/api/links/{code}/stats")
+def stats(code: str):
+    if db.get_link(code) is None:
+        raise HTTPException(404, "Unknown link")
+    return db.link_stats(code)
 
 
 @app.delete("/api/links/{code}", status_code=204)

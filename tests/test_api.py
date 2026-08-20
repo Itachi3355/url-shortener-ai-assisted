@@ -66,3 +66,26 @@ def test_expired_link_404(client):
 
 def test_health(client):
     assert client.get("/health").json() == {"status": "ok"}
+
+
+def test_stats_counts_clicks_and_referrers(client):
+    code = client.post("/api/shorten", json={"url": "https://example.com"}).json()["code"]
+    client.get(f"/{code}", follow_redirects=False)
+    client.get(f"/{code}", follow_redirects=False, headers={"referer": "https://news.site"})
+    s = client.get(f"/api/links/{code}/stats").json()
+    assert s["total_clicks"] == 2
+    assert sum(d["clicks"] for d in s["last_7_days"]) == 2
+    refs = {r["referrer"]: r["clicks"] for r in s["top_referrers"]}
+    assert refs == {"(direct)": 1, "https://news.site": 1}
+
+
+def test_stats_unknown_code_404(client):
+    assert client.get("/api/links/nope123/stats").status_code == 404
+
+
+def test_delete_cascades_clicks(client):
+    code = client.post("/api/shorten", json={"url": "https://example.com"}).json()["code"]
+    client.get(f"/{code}", follow_redirects=False)
+    client.delete(f"/api/links/{code}")
+    n = db.get_conn().execute("SELECT COUNT(*) FROM clicks WHERE code = ?", (code,)).fetchone()[0]
+    assert n == 0
