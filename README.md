@@ -58,6 +58,8 @@ python -m pytest tests/ -q
 rate-limit window behavior, private-IP rejection. Each test runs against a fresh
 temp database.
 
+Lint gate: `python -m ruff check app tests` — clean at HEAD.
+
 ## Testing approach
 
 - **API-level tests through `TestClient`** rather than unit tests per function —
