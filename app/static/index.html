@@ -63,13 +63,48 @@
   .result img{width:92px;height:92px;flex:none;border:1px solid var(--line);border-radius:6px}
   .result .actions{margin-left:auto;display:flex;flex-direction:column;gap:8px}
 
-  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  /* Fixed layout so the table can never demand more width than its container —
+     the destination column absorbs whatever is left and truncates. Without it,
+     a long URL widens the table and the whole card scrolls sideways. */
+  table{width:100%;border-collapse:collapse;font-size:13.5px;table-layout:fixed}
+  #linktable th:nth-child(1), #linktable .c-code{width:108px}
+  #linktable th:nth-child(3), #linktable .c-clicks{width:68px}
+  #linktable th:nth-child(4), #linktable .c-exp{width:98px}
+  #linktable th:nth-child(5), #linktable .c-act{width:164px}
+  #linktable .c-act{white-space:nowrap}
   th{font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--slate);text-align:left;padding:10px 22px;border-bottom:1px solid var(--line);background:#FAFBFC}
   td{padding:11px 22px;border-bottom:1px solid var(--mist);vertical-align:top}
   td .code{font-family:var(--mono);color:var(--blue);font-weight:500}
-  td .url{color:var(--slate);max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
+  td .url{color:var(--slate);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
   .clicks{font-variant-numeric:tabular-nums;font-weight:600}
   .empty{padding:34px 22px;text-align:center;color:var(--slate);font-size:13.5px}
+  .table-scroll{overflow-x:auto}
+
+  /* Narrow screens: reflow each row into a stacked card. A five-column table
+     on a phone means sideways swiping to read one link, so drop the table
+     layout entirely rather than making it scrollable. */
+  @media(max-width:820px){
+    .table-scroll{overflow-x:visible}
+    #linktable thead{display:none}
+    #linktable{table-layout:auto}
+    #linktable, #linktable tbody, #linktable tr, #linktable td{display:block;width:auto}
+    #linktable tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 14px;
+      padding:14px 22px;border-bottom:1px solid var(--mist)}
+    #linktable td{padding:0;border:0}
+    #linktable .c-code{grid-area:1/1}
+    #linktable .c-url{grid-area:2/1}
+    #linktable .c-clicks{grid-area:3/1}
+    #linktable .c-exp{grid-area:4/1}
+    #linktable .c-act{grid-area:1/2/5/3;align-self:center;display:flex;flex-direction:column;gap:7px}
+    #linktable .c-url .url{white-space:normal;max-width:none;word-break:break-all;font-size:12.5px}
+    #linktable .c-clicks::before, #linktable .c-exp::before{
+      content:attr(data-label) ': ';color:var(--slate);font-weight:400;font-size:12px}
+    #linktable .c-exp{color:var(--slate);font-size:12.5px}
+    /* the expanded stats row must stay a plain block, not become a card grid */
+    #linktable tr.detail{display:block;padding:0}
+    #linktable tr.detail td{display:block}
+    #linktable tr .empty{grid-area:1/1/2/3;text-align:center}
+  }
 
   /* stats expand under their own row */
   tr.detail td{padding:0;border-bottom:1px solid var(--line);background:var(--mist)}
@@ -175,8 +210,8 @@
     <section class="card" style="margin-top:24px">
       <div class="head"><h2>Your links</h2><span class="hint">GET /api/links · click a row for stats</span></div>
       <div id="statbox" class="statbox"></div>
-      <div style="overflow-x:auto">
-        <table>
+      <div class="table-scroll">
+        <table id="linktable">
           <thead><tr><th>Code</th><th>Destination</th><th>Clicks</th><th>Expires</th><th></th></tr></thead>
           <tbody id="rows"><tr><td colspan="5" class="empty">No links yet. Create one above — it appears here instantly.</td></tr></tbody>
         </table>
@@ -281,11 +316,11 @@ async function loadLinks(){
     // screen lets someone click Stats on a link that no longer exists.
     tb.innerHTML = j.links.length ? j.links.map(l=>`
       <tr>
-        <td><span class="code">/${esc(l.code)}</span></td>
-        <td><span class="url" title="${esc(l.url)}">${esc(l.url)}</span></td>
-        <td class="clicks">${l.clicks}</td>
-        <td style="color:var(--slate)">${l.expires_at ? esc(l.expires_at.slice(0,10)) : '—'}</td>
-        <td><button class="btn ghost" onclick="showStats('${esc(l.code)}', this)">Stats</button>
+        <td class="c-code"><span class="code">/${esc(l.code)}</span></td>
+        <td class="c-url"><span class="url" title="${esc(l.url)}">${esc(l.url)}</span></td>
+        <td class="c-clicks clicks" data-label="clicks">${l.clicks}</td>
+        <td class="c-exp" data-label="expires">${l.expires_at ? esc(l.expires_at.slice(0,10)) : '—'}</td>
+        <td class="c-act"><button class="btn ghost" onclick="showStats('${esc(l.code)}', this)">Stats</button>
             <button class="btn ghost" onclick="delLink('${esc(l.code)}')">Delete</button></td>
       </tr>`).join('') : EMPTY_ROW;
   } catch (e) {
