@@ -1,13 +1,14 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from app import db
+from app import db, ratelimit
 
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "DB_PATH", tmp_path / "test.db")
     monkeypatch.setattr(db, "_local", type(db._local)())  # fresh thread-local per test
+    ratelimit.reset()
     from app.main import app
     with TestClient(app) as c:
         yield c
@@ -89,3 +90,25 @@ def test_delete_cascades_clicks(client):
     client.delete(f"/api/links/{code}")
     n = db.get_conn().execute("SELECT COUNT(*) FROM clicks WHERE code = ?", (code,)).fetchone()[0]
     assert n == 0
+
+
+def test_rate_limit_429(client):
+    for i in range(ratelimit.LIMIT):
+        assert client.post("/api/shorten", json={"url": "https://example.com"}).status_code == 201
+    assert client.post("/api/shorten", json={"url": "https://example.com"}).status_code == 429
+
+
+def test_private_targets_rejected(client):
+    ratelimit.reset()
+    for url in ["http://localhost/admin", "http://127.0.0.1:8080/", "http://10.0.0.5/", "http://192.168.1.1/"]:
+        r = client.post("/api/shorten", json={"url": url})
+        assert r.status_code == 422, url
+
+
+def test_rate_limit_window_slides():
+    ratelimit.reset()
+    for _ in range(ratelimit.LIMIT):
+        assert ratelimit.allow("1.2.3.4", now=100.0)
+    assert not ratelimit.allow("1.2.3.4", now=100.0)
+    assert ratelimit.allow("1.2.3.4", now=100.0 + ratelimit.WINDOW + 1)
+    assert ratelimit.allow("5.6.7.8", now=100.0)  # per-IP isolation

@@ -6,7 +6,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
-from app import db, shortener
+from app import db, ratelimit, shortener
 
 
 @asynccontextmanager
@@ -45,6 +45,9 @@ def health():
 
 @app.post("/api/shorten", response_model=ShortenResponse, status_code=201)
 def shorten(body: ShortenRequest, request: Request):
+    ip = request.client.host if request.client else "unknown"
+    if not ratelimit.allow(ip):
+        raise HTTPException(429, "Rate limit exceeded: 10 links per minute")
     err = shortener.validate_url(body.url)
     if err:
         raise HTTPException(422, err)

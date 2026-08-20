@@ -1,4 +1,5 @@
 """Code generation and URL validation."""
+import ipaddress
 import re
 import secrets
 import string
@@ -25,6 +26,15 @@ def validate_url(url: str) -> str | None:
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         return "Only http/https URLs are allowed"
-    if not parsed.hostname:
+    host = parsed.hostname
+    if not host:
         return "URL has no hostname"
+    # Abuse guard: refuse links into private/loopback space (open-redirect into intranets)
+    if host == "localhost":
+        return "Internal hostnames are not allowed"
+    try:
+        if not ipaddress.ip_address(host).is_global:
+            return "Private or reserved IP targets are not allowed"
+    except ValueError:
+        pass  # a normal domain name, fine
     return None
