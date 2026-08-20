@@ -8,7 +8,7 @@ are inspectable:
 3bb57a1  Greenfield: core URL shortener
 5cbadeb  Brownfield: click analytics
 a3180d3  Ambiguous: "handle abuse" → rate limiting + internal-target guard
-(HEAD)   Brownfield 2: demo console, QR, structured logging, CI
+e85077e  Brownfield 2: demo console, QR, structured logging, CI
 ```
 
 ---
