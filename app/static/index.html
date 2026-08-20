@@ -219,32 +219,76 @@ function startCooldown(secs){
 $('copy').onclick = async () => { await navigator.clipboard.writeText(lastShort.short_url); $('copy').textContent='Copied ✓'; setTimeout(()=>$('copy').textContent='Copy link',1500); };
 $('visit').onclick = () => { window.open(lastShort.short_url,'_blank'); setTimeout(loadLinks,600); };
 
+/* ---------- shared response handling ----------
+   Every caller goes through here. A non-2xx body is {"detail": ...}, not the
+   success shape, so reading fields off it without checking status throws deep
+   inside the caller instead of surfacing the actual error. */
+async function getJSON(path, opts){
+  const r = await fetch(path, opts);
+  if (!r.ok){
+    let detail = null;
+    try { detail = (await r.json()).detail; } catch { /* no JSON body */ }
+    throw new Error(typeof detail === 'string' ? detail : `Request failed (HTTP ${r.status})`);
+  }
+  return r.status === 204 ? null : r.json();
+}
+
+/* Destinations are attacker-controlled text rendered into the table. The
+   scheme allowlist stops javascript: URLs but not quotes or angle brackets in
+   a path, so escape before interpolating. */
+const esc = s => String(s).replace(/[&<>"']/g, c => (
+  {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function showMessage(html, isError){
+  const box = $('statbox');
+  box.innerHTML = html;
+  box.style.color = isError ? 'var(--red)' : '';
+  box.classList.add('show');
+}
+
 /* ---------- links table ---------- */
+const EMPTY_ROW = '<tr><td colspan="5" class="empty">No links yet. Create one above — it appears here instantly.</td></tr>';
+
 async function loadLinks(){
-  const j = await (await api('/api/links')).json();
   const tb = $('rows');
-  if (!j.links.length) return;
-  tb.innerHTML = j.links.map(l=>`
-    <tr>
-      <td><span class="code">/${l.code}</span></td>
-      <td><span class="url" title="${l.url}">${l.url}</span></td>
-      <td class="clicks">${l.clicks}</td>
-      <td style="color:var(--slate)">${l.expires_at ? l.expires_at.slice(0,10) : '—'}</td>
-      <td><button class="btn ghost" onclick="showStats('${l.code}')">Stats</button>
-          <button class="btn ghost" onclick="delLink('${l.code}')">Delete</button></td>
-    </tr>`).join('');
+  try {
+    const j = await getJSON('/api/links');
+    // Must reset to the empty state, not return early: leaving stale rows on
+    // screen lets someone click Stats on a link that no longer exists.
+    tb.innerHTML = j.links.length ? j.links.map(l=>`
+      <tr>
+        <td><span class="code">/${esc(l.code)}</span></td>
+        <td><span class="url" title="${esc(l.url)}">${esc(l.url)}</span></td>
+        <td class="clicks">${l.clicks}</td>
+        <td style="color:var(--slate)">${l.expires_at ? esc(l.expires_at.slice(0,10)) : '—'}</td>
+        <td><button class="btn ghost" onclick="showStats('${esc(l.code)}')">Stats</button>
+            <button class="btn ghost" onclick="delLink('${esc(l.code)}')">Delete</button></td>
+      </tr>`).join('') : EMPTY_ROW;
+  } catch (e) {
+    tb.innerHTML = `<tr><td colspan="5" class="empty">Could not load links — ${esc(e.message)}</td></tr>`;
+  }
 }
+
 async function showStats(code){
-  const s = await (await api(`/api/links/${code}/stats`)).json();
-  const days = s.last_7_days.map(d=>`${d.day}: ${d.clicks}`).join('  ·  ') || 'no clicks in last 7 days';
-  const refs = s.top_referrers.map(r=>`${r.referrer} (${r.clicks})`).join(', ') || '—';
-  $('statbox').innerHTML = `<b>/${code}</b> — ${s.total_clicks} total click${s.total_clicks===1?'':'s'}<br>
-    <span class="mono">7-day: ${days}</span><br><span class="mono">referrers: ${refs}</span>`;
-  $('statbox').classList.add('show');
+  try {
+    const s = await getJSON(`/api/links/${encodeURIComponent(code)}/stats`);
+    const days = s.last_7_days.map(d=>`${d.day}: ${d.clicks}`).join('  ·  ') || 'no clicks in last 7 days';
+    const refs = s.top_referrers.map(r=>`${esc(r.referrer)} (${r.clicks})`).join(', ') || '—';
+    showMessage(`<b>/${esc(code)}</b> — ${s.total_clicks} total click${s.total_clicks===1?'':'s'}<br>
+      <span class="mono">7-day: ${esc(days)}</span><br><span class="mono">referrers: ${refs}</span>`, false);
+  } catch (e) {
+    showMessage(`<b>/${esc(code)}</b> — ${esc(e.message)}`, true);
+    loadLinks();   // the row was stale; refresh so it disappears
+  }
 }
+
 async function delLink(code){
-  await api(`/api/links/${code}`, {method:'DELETE'});
-  $('statbox').classList.remove('show');
+  try {
+    await getJSON(`/api/links/${encodeURIComponent(code)}`, {method:'DELETE'});
+    $('statbox').classList.remove('show');
+  } catch (e) {
+    showMessage(`<b>/${esc(code)}</b> — ${esc(e.message)}`, true);
+  }
   loadLinks();
 }
 loadLinks();

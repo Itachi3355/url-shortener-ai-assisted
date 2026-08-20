@@ -147,8 +147,34 @@ The lesson is recorded here rather than quietly fixed: **AI-generated edits fail
 in ways that stay syntactically valid, so a green suite is a floor, not a
 ceiling.** `test_health` now covers it.
 
+**A second bug, this one reported from use.** Clicking *Stats* on a row threw
+`TypeError: Cannot read properties of undefined (reading 'map')`. The stack
+pointed at `showStats`, but that was the symptom. Two causes sat behind it:
+
+1. `loadLinks()` returned early when the list came back empty, leaving deleted
+   rows on screen — so a button existed for a link that no longer did.
+2. Three separate fetch call sites read success fields without checking the
+   status. An error body is `{"detail": …}`, so the failure surfaced as a
+   `TypeError` deep in the caller instead of the actual message, "Unknown link".
+
+The fix went in once, in a shared `getJSON()` that throws on any non-2xx, rather
+than as a guard in the function named by the stack trace — the other two call
+sites had the identical flaw and would have failed the same way next.
+
+**And a security bug found while reading that code.** Destinations are
+attacker-controlled text interpolated into `innerHTML`. The scheme allowlist
+blocks `javascript:` URLs but says nothing about quotes or angle brackets *in a
+path*, so shortening `https://example.com/x"><img src=x onerror=…>` would inject
+markup into the console for anyone viewing it. Output is now escaped at the
+render site; verified with that exact payload — it renders as literal text, zero
+injected elements. Worth naming precisely: input validation and output encoding
+are different controls, and passing the first is not passing the second.
+
 **Validation.** 6 new tests (console served, list with click counts, QR SVG, QR
-404, request-ID generated, request-ID echoed). Full suite: 20 green, ruff clean.
+404, request-ID generated, request-ID echoed), plus 2 contract tests guarding
+what the console depends on: error bodies carry a string `detail`, and hostile
+URLs round-trip through storage unmodified (escaping belongs to the renderer,
+not the store). Full suite: 25 green, ruff clean.
 Structured logging verified against a live server — a supplied
 `X-Request-ID: demo-trace-1` appears in the emitted log line, and an unsupplied
 one is generated. Console verified in a real browser at desktop and mobile

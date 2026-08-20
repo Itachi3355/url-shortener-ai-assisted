@@ -115,9 +115,10 @@ upstream trace ID survives into these logs.
 python -m pytest tests/ -q
 ```
 
-20 tests: happy paths, alias collisions, invalid inputs, expiry, delete cascade,
-rate-limit window behavior, private-IP rejection, QR generation, request-ID
-propagation. Each test runs against a fresh temp database.
+25 tests: happy paths, alias collisions, invalid inputs, expiry, delete cascade,
+rate-limit window behavior and `Retry-After`, private-IP rejection, QR
+generation, request-ID propagation, and the error-body contract the console
+depends on. Each test runs against a fresh temp database.
 
 ```bash
 python -m ruff check app tests

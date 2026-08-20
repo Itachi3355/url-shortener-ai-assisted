@@ -172,3 +172,19 @@ def test_retry_after_counts_down_with_window():
         ratelimit.allow("8.8.8.8", now=100.0)
     assert ratelimit.retry_after("8.8.8.8", now=100.0) == 60
     assert ratelimit.retry_after("8.8.8.8", now=145.0) == 15
+
+
+def test_error_bodies_carry_string_detail(client):
+    """The console renders `detail` directly; a non-string would break it."""
+    code = client.post("/api/shorten", json={"url": "https://example.com"}).json()["code"]
+    client.delete(f"/api/links/{code}")
+    for r in (client.get(f"/api/links/{code}/stats"), client.delete(f"/api/links/{code}")):
+        assert r.status_code == 404
+        assert isinstance(r.json()["detail"], str)
+
+
+def test_url_with_html_metacharacters_round_trips(client):
+    """Stored verbatim — escaping is the renderer's job, not the store's."""
+    hostile = 'https://example.com/x"><img src=x onerror=alert(1)>'
+    assert client.post("/api/shorten", json={"url": hostile}).status_code == 201
+    assert client.get("/api/links").json()["links"][0]["url"] == hostile
