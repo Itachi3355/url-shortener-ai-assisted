@@ -1,12 +1,18 @@
 """URL shortener API."""
+import io
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
+import segno
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
 from app import db, ratelimit, shortener
+from app.logging_mw import RequestLogMiddleware
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 @asynccontextmanager
@@ -16,6 +22,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="URL Shortener", version="0.1.0", lifespan=lifespan)
+app.add_middleware(RequestLogMiddleware)
 
 
 class ShortenRequest(BaseModel):
@@ -35,6 +42,25 @@ def _expired(row) -> bool:
     if row["expires_at"] is None:
         return False
     return datetime.fromisoformat(row["expires_at"]) <= datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+@app.get("/", include_in_schema=False)
+def console():
+    return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/api/links")
+def list_links():
+    return {"links": db.list_links()}
+
+
+@app.get("/api/links/{code}/qr")
+def qr(code: str, request: Request):
+    if db.get_link(code) is None:
+        raise HTTPException(404, "Unknown link")
+    buf = io.BytesIO()
+    segno.make(str(request.base_url) + code, error="m").save(buf, kind="svg", scale=4, dark="#001F3E")
+    return Response(buf.getvalue(), media_type="image/svg+xml")
 
 
 @app.get("/health")

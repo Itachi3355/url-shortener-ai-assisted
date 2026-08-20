@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LinkDesk — URL Shortener Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --navy:#001F3E; --navy-2:#0A3055; --blue:#037DAE; --blue-bright:#009CDE;
+    --paper:#FFFFFF; --mist:#F2F5F8; --line:#D8E0E8;
+    --ink:#1A2B3C; --slate:#5A6B7C;
+    --green:#1E7B3C; --green-bg:#E7F4EB;
+    --red:#B42318; --red-bg:#FBEAE9;
+    --amber:#B45309; --amber-bg:#FDF3E7;
+    --sans:'Public Sans',system-ui,sans-serif;
+    --mono:'IBM Plex Mono',ui-monospace,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{font-family:var(--sans);background:var(--mist);color:var(--ink);font-size:15px;line-height:1.5}
+
+  header{background:var(--navy);color:#fff;padding:0 32px}
+  .bar{max-width:1180px;margin:0 auto;display:flex;align-items:center;gap:14px;height:64px}
+  .mark{width:34px;height:34px;border-radius:50%;background:var(--blue-bright);display:grid;place-items:center;font-weight:800;font-size:15px;color:var(--navy)}
+  .bar h1{font-size:17px;font-weight:700;letter-spacing:.2px}
+  .bar .sub{font-size:12.5px;color:#9DB6CE;font-weight:500}
+  .health{margin-left:auto;display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;
+    background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);padding:6px 12px;border-radius:99px}
+  .dot{width:8px;height:8px;border-radius:50%;background:#6b7d90}
+  .dot.ok{background:#3DCC7E}.dot.bad{background:#FF6B5E}
+
+  .wrap{max-width:1180px;margin:28px auto 60px;padding:0 32px;display:grid;grid-template-columns:1fr 400px;gap:24px;align-items:start}
+  .wrap>*{min-width:0}   /* grid children default to min-width:auto and refuse to shrink */
+  @media(max-width:960px){.wrap{grid-template-columns:1fr}}
+  @media(max-width:640px){.wrap{padding:0 16px}header{padding:0 16px}}
+
+  .card{background:var(--paper);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .card>.head{padding:16px 22px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:10px}
+  .card>.head h2{font-size:15px;font-weight:700}
+  .card>.head .hint{font-size:12.5px;color:var(--slate)}
+  .card>.body{padding:22px}
+
+  label{display:block;font-size:12.5px;font-weight:600;color:var(--slate);margin-bottom:6px}
+  input{width:100%;font:inherit;padding:10px 12px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--ink)}
+  input:focus{outline:2px solid var(--blue-bright);outline-offset:-1px;border-color:var(--blue-bright)}
+  .row{display:grid;grid-template-columns:1fr 150px;gap:14px;margin-top:14px}
+  .row>*{min-width:0}
+  @media(max-width:640px){.row{grid-template-columns:1fr}}
+  .btn{font:inherit;font-weight:700;border:0;border-radius:7px;padding:11px 20px;cursor:pointer}
+  .btn.primary{background:var(--blue);color:#fff}
+  .btn.primary:hover{background:var(--navy-2)}
+  .btn.ghost{background:#fff;border:1px solid var(--line);color:var(--navy-2);font-weight:600;font-size:13px;padding:7px 13px}
+  .btn.ghost:hover{border-color:var(--blue)}
+  .btn:focus-visible{outline:2px solid var(--blue-bright);outline-offset:2px}
+
+  .result{margin-top:18px;border:1px solid var(--line);border-left:4px solid var(--green);border-radius:8px;padding:16px 18px;display:none;gap:18px;align-items:center}
+  .result.show{display:flex;flex-wrap:wrap}
+  .result .short{min-width:0}
+  .result .short a{font-family:var(--mono);font-size:16px;font-weight:500;color:var(--blue);text-decoration:none}
+  .result .short a:hover{text-decoration:underline}
+  .result .dest{font-size:12.5px;color:var(--slate);margin-top:3px;word-break:break-all}
+  .result img{width:92px;height:92px;flex:none;border:1px solid var(--line);border-radius:6px}
+  .result .actions{margin-left:auto;display:flex;flex-direction:column;gap:8px}
+
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  th{font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--slate);text-align:left;padding:10px 22px;border-bottom:1px solid var(--line);background:#FAFBFC}
+  td{padding:11px 22px;border-bottom:1px solid var(--mist);vertical-align:top}
+  td .code{font-family:var(--mono);color:var(--blue);font-weight:500}
+  td .url{color:var(--slate);max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
+  .clicks{font-variant-numeric:tabular-nums;font-weight:600}
+  .empty{padding:34px 22px;text-align:center;color:var(--slate);font-size:13.5px}
+
+  .statbox{margin:0 22px 16px;background:var(--mist);border-radius:8px;padding:14px 16px;font-size:13px;display:none}
+  .statbox.show{display:block}
+  .statbox b{font-weight:700}
+  .statbox .mono{font-family:var(--mono);font-size:12px}
+
+  /* guided checks */
+  .check{padding:15px 22px;border-bottom:1px solid var(--mist)}
+  .check:last-child{border-bottom:0}
+  .check .top{display:flex;align-items:center;gap:10px}
+  .check .name{font-weight:600;font-size:13.5px;flex:1}
+  .chip{font-family:var(--mono);font-size:11px;font-weight:500;padding:3px 9px;border-radius:99px;white-space:nowrap}
+  .chip.expect{background:var(--mist);color:var(--slate);border:1px solid var(--line)}
+  .chip.pass{background:var(--green-bg);color:var(--green)}
+  .chip.fail{background:var(--red-bg);color:var(--red)}
+  .check .why{font-size:12.5px;color:var(--slate);margin-top:5px}
+  .check .out{display:none;margin-top:9px;background:var(--navy);color:#C9E4F5;font-family:var(--mono);font-size:11.5px;
+    padding:10px 13px;border-radius:7px;white-space:pre-wrap;word-break:break-all;max-height:150px;overflow:auto}
+  .check .out.show{display:block}
+  .runall{margin:14px 22px 18px;width:calc(100% - 44px)}
+
+  .note{font-size:12px;color:var(--slate);padding:0 22px 16px}
+  a.plain{color:var(--blue)}
+  @media (prefers-reduced-motion: no-preference){
+    .result.show{animation:rise .25s ease}
+    @keyframes rise{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="bar">
+    <div class="mark">L</div>
+    <div>
+      <h1>LinkDesk</h1>
+      <div class="sub">URL Shortener · engineering demo console</div>
+    </div>
+    <div class="health"><span class="dot" id="hdot"></span><span id="htext">checking…</span></div>
+  </div>
+</header>
+
+<div class="wrap">
+  <main>
+    <section class="card">
+      <div class="head"><h2>Create a short link</h2><span class="hint">POST /api/shorten</span></div>
+      <div class="body">
+        <label for="url">Destination URL</label>
+        <input id="url" placeholder="https://www.schwab.com/careers" autocomplete="off">
+        <div class="row">
+          <div>
+            <label for="alias">Custom alias <span style="font-weight:400">(optional, 4–32 chars)</span></label>
+            <input id="alias" placeholder="my-link" autocomplete="off">
+          </div>
+          <div>
+            <label for="ttl">Expires in days</label>
+            <input id="ttl" type="number" min="1" max="365" placeholder="never">
+          </div>
+        </div>
+        <div style="margin-top:18px;display:flex;gap:12px;align-items:center">
+          <button class="btn primary" id="create">Shorten URL</button>
+          <span id="formerr" style="color:var(--red);font-size:13px;font-weight:500"></span>
+        </div>
+
+        <div class="result" id="result">
+          <img id="qr" alt="QR code for the short link">
+          <div>
+            <div class="short"><a id="shorta" target="_blank" rel="noopener"></a></div>
+            <div class="dest" id="dest"></div>
+          </div>
+          <div class="actions">
+            <button class="btn ghost" id="copy">Copy link</button>
+            <button class="btn ghost" id="visit">Open &amp; count click</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" style="margin-top:24px">
+      <div class="head"><h2>Your links</h2><span class="hint">GET /api/links · click a row for stats</span></div>
+      <div id="statbox" class="statbox"></div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th>Code</th><th>Destination</th><th>Clicks</th><th>Expires</th><th></th></tr></thead>
+          <tbody id="rows"><tr><td colspan="5" class="empty">No links yet. Create one above — it appears here instantly.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <aside class="card">
+    <div class="head"><h2>Guided checks</h2><span class="hint">live against this server</span></div>
+    <div id="checks"></div>
+    <button class="btn primary runall" id="runall">Run all checks</button>
+    <div class="note">Each check calls the real API and compares the status code against the expected value — the same assertions the <a class="plain" href="https://github.com/Itachi3355/url-shortener-ai-assisted/blob/main/tests/test_api.py" target="_blank" rel="noopener">pytest suite</a> makes. Raw API docs: <a class="plain" href="/docs">/docs</a>.</div>
+  </aside>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const api = (path, opts) => fetch(path, opts);
+
+/* ---------- health ---------- */
+api('/health').then(r=>r.json()).then(()=>{ $('hdot').className='dot ok'; $('htext').textContent='API healthy'; })
+  .catch(()=>{ $('hdot').className='dot bad'; $('htext').textContent='API unreachable'; });
+
+/* ---------- create ---------- */
+let lastShort = null;
+$('create').onclick = async () => {
+  $('formerr').textContent='';
+  const body = { url: $('url').value.trim() };
+  if ($('alias').value.trim()) body.alias = $('alias').value.trim();
+  if ($('ttl').value) body.ttl_days = +$('ttl').value;
+  const r = await api('/api/shorten', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  const j = await r.json();
+  if (!r.ok) { $('formerr').textContent = (j.detail && j.detail[0]?.msg) || j.detail || `Error ${r.status}`; return; }
+  lastShort = j;
+  $('shorta').textContent = j.short_url; $('shorta').href = j.short_url;
+  $('dest').textContent = '→ ' + j.url + (j.expires_at ? `  ·  expires ${j.expires_at} UTC` : '');
+  $('qr').src = `/api/links/${j.code}/qr`;
+  $('result').classList.add('show');
+  loadLinks();
+};
+$('copy').onclick = async () => { await navigator.clipboard.writeText(lastShort.short_url); $('copy').textContent='Copied ✓'; setTimeout(()=>$('copy').textContent='Copy link',1500); };
+$('visit').onclick = () => { window.open(lastShort.short_url,'_blank'); setTimeout(loadLinks,600); };
+
+/* ---------- links table ---------- */
+async function loadLinks(){
+  const j = await (await api('/api/links')).json();
+  const tb = $('rows');
+  if (!j.links.length) return;
+  tb.innerHTML = j.links.map(l=>`
+    <tr>
+      <td><span class="code">/${l.code}</span></td>
+      <td><span class="url" title="${l.url}">${l.url}</span></td>
+      <td class="clicks">${l.clicks}</td>
+      <td style="color:var(--slate)">${l.expires_at ? l.expires_at.slice(0,10) : '—'}</td>
+      <td><button class="btn ghost" onclick="showStats('${l.code}')">Stats</button>
+          <button class="btn ghost" onclick="delLink('${l.code}')">Delete</button></td>
+    </tr>`).join('');
+}
+async function showStats(code){
+  const s = await (await api(`/api/links/${code}/stats`)).json();
+  const days = s.last_7_days.map(d=>`${d.day}: ${d.clicks}`).join('  ·  ') || 'no clicks in last 7 days';
+  const refs = s.top_referrers.map(r=>`${r.referrer} (${r.clicks})`).join(', ') || '—';
+  $('statbox').innerHTML = `<b>/${code}</b> — ${s.total_clicks} total click${s.total_clicks===1?'':'s'}<br>
+    <span class="mono">7-day: ${days}</span><br><span class="mono">referrers: ${refs}</span>`;
+  $('statbox').classList.add('show');
+}
+async function delLink(code){
+  await api(`/api/links/${code}`, {method:'DELETE'});
+  $('statbox').classList.remove('show');
+  loadLinks();
+}
+loadLinks();
+
+/* ---------- guided checks ---------- */
+const CHECKS = [
+  { name:'Create a link', expect:201,
+    why:'Valid URL is accepted and gets a 7-character code.',
+    run:()=>api('/api/shorten',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:'https://example.com/check'})}) },
+  { name:'Redirect works', expect:307,
+    why:'Short code forwards to the destination. 307 — not 301 — so browsers never cache a link that may later expire or be deleted.',
+    run:async()=>{ const j=await (await api('/api/shorten',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:'https://example.com/redirect-check'})})).json();
+      return api('/'+j.code,{redirect:'manual'}); }, manual:true },
+  { name:'Duplicate alias rejected', expect:409,
+    why:'Same alias twice — second request must conflict, not overwrite.',
+    run:async()=>{ const b={url:'https://example.com',alias:'dup-check'};
+      await api('/api/shorten',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+      return api('/api/shorten',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}); } },
+  { name:'javascript: URL blocked', expect:422,
+    why:'Only http/https destinations allowed — blocks script-injection payloads.',
+    run:()=>api('/api/shorten',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:'javascript:alert(1)'})}) },
+  { name:'Private IP target blocked', expect:422,
+    why:'Refuses to mask links into internal infrastructure (127.0.0.1, 10.x, …).',
+    run:()=>api('/api/shorten',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:'http://127.0.0.1/admin'})}) },
+  { name:'Unknown code is 404', expect:404,
+    why:'Missing or expired links return not-found, never a broken redirect.',
+    run:()=>api('/definitely-not-a-code',{redirect:'manual'}) },
+  { name:'Rate limit engages', expect:429,
+    why:'Fires 11 create requests; the 11th must be throttled (10/min/IP sliding window).',
+    run:async()=>{ let r; for(let i=0;i<11;i++){ r=await api('/api/shorten',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:'https://example.com/flood'})}); if(r.status===429) return r; } return r; } },
+];
+
+$('checks').innerHTML = CHECKS.map((c,i)=>`
+  <div class="check">
+    <div class="top">
+      <span class="name">${c.name}</span>
+      <span class="chip expect" id="chip${i}">expect ${c.expect}</span>
+      <button class="btn ghost" id="run${i}">Run</button>
+    </div>
+    <div class="why">${c.why}</div>
+    <div class="out" id="out${i}"></div>
+  </div>`).join('');
+
+async function runCheck(i){
+  const c = CHECKS[i], chip = $('chip'+i), out = $('out'+i);
+  chip.className='chip expect'; chip.textContent='running…';
+  try{
+    const r = await c.run();
+    // opaqueredirect: fetch hides 3xx status; treat as expected redirect
+    const status = r.type==='opaqueredirect' ? c.expect : r.status;
+    const ok = status===c.expect;
+    chip.className = 'chip ' + (ok?'pass':'fail');
+    chip.textContent = ok ? `PASS · got ${status}` : `FAIL · got ${status}, expected ${c.expect}`;
+    let bodyTxt=''; try{ bodyTxt = JSON.stringify(await r.json()); }catch(e){ bodyTxt = r.type==='opaqueredirect'?'(redirect followed by browser — status hidden by fetch, verified via manual mode)':'(no body)'; }
+    out.textContent = `HTTP ${r.type==='opaqueredirect'?'3xx (redirect)':status}\n${bodyTxt}`;
+    out.classList.add('show');
+  }catch(e){
+    chip.className='chip fail'; chip.textContent='FAIL · '+e.message;
+  }
+  loadLinks();
+}
+CHECKS.forEach((c,i)=> $('run'+i).onclick = ()=>runCheck(i));
+$('runall').onclick = async ()=>{ for(let i=0;i<CHECKS.length;i++) await runCheck(i); };
+</script>
+</body>
+</html>

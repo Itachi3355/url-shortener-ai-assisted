@@ -60,6 +60,17 @@ def get_link(code: str) -> sqlite3.Row | None:
     ).fetchone()
 
 
+def list_links(limit: int = 50) -> list[dict]:
+    rows = get_conn().execute(
+        """SELECT l.code, l.url, l.created_at, l.expires_at,
+                  COUNT(c.id) AS clicks
+           FROM links l LEFT JOIN clicks c ON c.code = l.code
+           GROUP BY l.code ORDER BY l.created_at DESC LIMIT ?""",
+        (limit,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def record_click(code: str, referrer: str | None) -> None:
     # ponytail: synchronous insert on redirect path; queue/batch if redirect latency matters
     with get_conn() as conn:

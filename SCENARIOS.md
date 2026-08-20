@@ -1,11 +1,14 @@
-# Three Scenarios
+# Scenarios
 
-Each scenario maps to one git commit, so the diffs are inspectable:
+The three scenarios the brief asks for are scenarios 1–3. Scenario 4 is a second
+brownfield increment added afterwards. Each maps to one git commit, so the diffs
+are inspectable:
 
 ```
 3bb57a1  Greenfield: core URL shortener
 5cbadeb  Brownfield: click analytics
 a3180d3  Ambiguous: "handle abuse" → rate limiting + internal-target guard
+(HEAD)   Brownfield 2: demo console, QR, structured logging, CI
 ```
 
 ---
@@ -91,3 +94,53 @@ safety.
 **Validation.** 3 new tests: 11th request in a minute → 429; private targets →
 422; window-slide + per-IP isolation via injected clock (no sleeps in the
 suite). Full suite: 14 green.
+
+---
+
+## Scenario 4 — Brownfield, second increment: demo console + reliability
+
+Added after the three required scenarios, on a real observation: the API was
+correct but *unreviewable without curl*. A reviewer's first five minutes decide
+whether the rest gets read, and `/docs` alone does not show that the security
+guards work.
+
+**Requirement, as I wrote it for myself:** "Make the system verifiable by
+someone who has not read the code, in under two minutes, without a terminal."
+
+**Decomposition:**
+
+1. `GET /api/links` — the console needs a list endpoint; the API had none
+2. `GET /api/links/{code}/qr` — QR as SVG via `segno`
+3. `GET /` — static console page
+4. Guided checks — each probe declares its expected status code before running
+5. `RequestLogMiddleware` — correlation IDs and JSON access logs
+6. GitHub Actions — run pytest and ruff on every push
+
+**The design constraint that mattered.** The console calls only public API
+endpoints — no privileged route, no server-rendered state. That keeps the API
+as the single contract, so the demo cannot show something the API doesn't
+actually do. It also means the page is a static file: no build step, no
+framework, nothing for a reviewer to install.
+
+**Why the guided checks name their expected status first.** A demo that just
+shows green ticks proves nothing — the reader has to trust it. Declaring
+"expect 422" *before* running, then showing the received status and the raw
+response body, makes the assertion falsifiable on screen. These mirror the
+pytest assertions, so the two agree by construction.
+
+**A real bug this stage caught.** Wiring the QR route in, an edit landed on top
+of the `/health` handler: its decorator was replaced and its body left as
+unreachable code after the `return` in `qr()`. Tests still passed — nothing
+covered `/health`'s absence at that moment, and the dead lines were valid
+Python. Reading the full file rather than trusting the diff is what surfaced it.
+The lesson is recorded here rather than quietly fixed: **AI-generated edits fail
+in ways that stay syntactically valid, so a green suite is a floor, not a
+ceiling.** `test_health` now covers it.
+
+**Validation.** 6 new tests (console served, list with click counts, QR SVG, QR
+404, request-ID generated, request-ID echoed). Full suite: 20 green, ruff clean.
+Structured logging verified against a live server — a supplied
+`X-Request-ID: demo-trace-1` appears in the emitted log line, and an unsupplied
+one is generated. Console verified in a real browser at desktop and mobile
+widths; a mobile layout overflow (grid children default to `min-width:auto` and
+refuse to shrink) was found and fixed during that pass.

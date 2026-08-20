@@ -15,25 +15,50 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
-Interactive API docs: http://127.0.0.1:8000/docs
+Then open **http://127.0.0.1:8000** — the LinkDesk console. Raw OpenAPI docs are
+at [/docs](http://127.0.0.1:8000/docs).
 
-## Quick demo
+## The console
+
+`GET /` serves a single static page (no build step, no framework) that exercises
+every endpoint against the live server:
+
+- **Create a short link** — destination, optional alias, optional TTL. On success
+  it shows the short URL, a scannable QR code, and copy / open actions.
+- **Your links** — every link with live click counts; per-row stats and delete.
+- **Guided checks** — seven one-click probes. Each names the status code it
+  expects *before* it runs, then shows PASS/FAIL plus the raw response body.
+  They assert the same things the pytest suite does, so a reviewer can confirm
+  behavior without reading the test file.
+
+| Check | Expects | What it proves |
+|---|---|---|
+| Create a link | `201` | Valid URL accepted, 7-char code issued |
+| Redirect works | `307` | Forwards to destination without permanent caching |
+| Duplicate alias rejected | `409` | Second claim conflicts instead of overwriting |
+| `javascript:` URL blocked | `422` | Scheme allowlist blocks script payloads |
+| Private IP target blocked | `422` | Won't mask links into internal infrastructure |
+| Unknown code is 404 | `404` | No broken redirects for missing/expired links |
+| Rate limit engages | `429` | 11th create in a minute is throttled |
+
+## Quick demo (CLI equivalent)
 
 ```bash
-# create a short link
 curl -s -X POST http://127.0.0.1:8000/api/shorten \
   -H "Content-Type: application/json" \
-  -d '{"url": "https://www.schwab.com/careers", "alias": "schwab"}'
-
-# follow it (307 → target)
-curl -i http://127.0.0.1:8000/schwab
-
-# stats
-curl -s http://127.0.0.1:8000/api/links/schwab/stats
-
-# delete
-curl -X DELETE http://127.0.0.1:8000/api/links/schwab
+  -d '{"url": "https://www.schwab.com/careers", "alias": "careers"}'
 ```
+
+```bash
+curl -i http://127.0.0.1:8000/careers
+```
+
+```bash
+curl -s http://127.0.0.1:8000/api/links/careers/stats
+```
+
+On Windows PowerShell use `curl.exe` (bare `curl` is an alias for
+`Invoke-WebRequest` and won't accept these flags).
 
 ## API
 
@@ -41,12 +66,31 @@ curl -X DELETE http://127.0.0.1:8000/api/links/schwab
 |---|---|---|
 | POST | `/api/shorten` | Create link. Body: `url`, optional `alias` (4–32 chars), optional `ttl_days` (1–365) |
 | GET | `/{code}` | 307 redirect; records click. 404 if unknown/expired |
+| GET | `/api/links` | All links with click counts, newest first |
 | GET | `/api/links/{code}/stats` | Total clicks, 7-day daily series, top referrers |
+| GET | `/api/links/{code}/qr` | QR code for the short link, as SVG |
 | DELETE | `/api/links/{code}` | Remove link (clicks cascade) |
 | GET | `/health` | Liveness + DB check |
+| GET | `/` | LinkDesk console (static page) |
 
 Errors: `422` invalid URL/alias, `409` alias taken, `429` rate limited
 (10 creates/min/IP), `404` unknown or expired.
+
+Every response carries an `X-Request-ID` header. Supply your own to trace a
+request end to end; otherwise one is generated.
+
+## Observability
+
+Requests are logged as one JSON object per line, correlated by request ID:
+
+```json
+{"ts": "2026-08-20T15:51:10", "level": "INFO", "request_id": "demo-trace-1",
+ "message": "request", "method": "GET", "path": "/health", "status": 200, "duration_ms": 5.67}
+```
+
+Structured rather than formatted, so a log aggregator can index `status` and
+`duration_ms` without parsing prose. An incoming `X-Request-ID` is honored so an
+upstream trace ID survives into these logs.
 
 ## Tests
 
@@ -54,11 +98,16 @@ Errors: `422` invalid URL/alias, `409` alias taken, `429` rate limited
 python -m pytest tests/ -q
 ```
 
-14 tests: happy paths, alias collisions, invalid inputs, expiry, delete cascade,
-rate-limit window behavior, private-IP rejection. Each test runs against a fresh
-temp database.
+20 tests: happy paths, alias collisions, invalid inputs, expiry, delete cascade,
+rate-limit window behavior, private-IP rejection, QR generation, request-ID
+propagation. Each test runs against a fresh temp database.
 
-Lint gate: `python -m ruff check app tests` — clean at HEAD.
+```bash
+python -m ruff check app tests
+```
+
+Both gates run on every push via [GitHub Actions](.github/workflows/ci.yml) —
+the quality gates are enforced by CI, not just claimed in a document.
 
 ## Testing approach
 
@@ -82,4 +131,9 @@ Lint gate: `python -m ruff check app tests` — clean at HEAD.
 - **DNS-based SSRF gap**: the private-IP guard checks literal IPs, not domains
   that *resolve* to private IPs. Resolving at creation time still allows
   DNS rebinding; a real fix validates at a fetch proxy, out of scope here.
-- **No pagination on stats** — referrer list capped at 10 instead.
+- **No pagination on stats or link list** — referrers capped at 10, links at 50.
+- **Console has no auth and lists every link** — it is a demo surface for a
+  single-tenant prototype, not a customer-facing dashboard. With auth added,
+  `/api/links` would filter by owner.
+- **Logs go to stdout only** — correct for a container, but there is no shipping
+  or retention configured.

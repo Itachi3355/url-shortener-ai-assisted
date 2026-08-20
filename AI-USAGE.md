@@ -32,12 +32,24 @@ recording scope and rationale.
 | Delete/clicks orphan handling | I identified the gap during impact analysis | AI implemented FK CASCADE; I verified `PRAGMA foreign_keys=ON` was actually set (SQLite defaults it OFF — classic silent failure) |
 | Rate limiter | AI generated to my spec (sliding window, injectable clock) | **Accepted.** Injectable `now` was in the acceptance criteria so tests need no sleeps |
 | Regex-blocklist "malware filter" | Considered for the abuse scenario | **Rejected as false safety.** A keyword blocklist looks like security and isn't; recorded the real solution (threat-intel API) as a limitation instead |
-| Test suite (14 tests) | AI generated from acceptance criteria per stage | **Reviewed each assertion** — notably verified `test_delete_cascades_clicks` queries the DB directly rather than trusting the API's 204 |
+| Test suite (20 tests) | AI generated from acceptance criteria per stage | **Reviewed each assertion** — notably verified `test_delete_cascades_clicks` queries the DB directly rather than trusting the API's 204 |
+| Console UI (`static/index.html`) | AI generated to my spec: one static file, no framework, public endpoints only | **Accepted after constraining it.** The "no build step" rule was mine — a React SPA would make the reviewer run npm before seeing anything |
+| Guided checks design | AI proposed buttons that showed a green tick on success | **Rejected → redesigned.** A tick the reader must trust proves nothing; each check now declares its expected status code before running and prints the raw response |
+| `/health` clobbered by a QR-route edit | AI edit replaced the handler; its body survived as unreachable code | **Caught in review, not by tests.** Found by reading the whole file; the suite was green because nothing asserted `/health` existed. Documented in SCENARIOS.md rather than quietly fixed |
+| Mobile layout overflow | Found by me during live browser verification | AI applied the fix (`min-width:0` on grid children); I verified `scrollWidth == clientWidth` at 375px afterwards rather than trusting the change |
+| QR library choice | AI suggested Pillow-based generation | **Rejected → `segno`.** Pillow pulls binary dependencies that break "clone and run"; segno is pure Python and emits SVG |
+| Structured logging middleware | AI generated to my spec | **Edited:** the draft always generated a request ID. Changed to honor an inbound `X-Request-ID` first — always generating silently breaks upstream tracing |
+| CI workflow | AI generated | **Accepted.** Added specifically so the "quality gates" claim in this document is enforced by CI rather than asserted in prose |
 | Docs (README/ARCHITECTURE/SCENARIOS) | AI drafted | **Reviewed for honesty** — limitations section states real gaps (DNS-rebinding SSRF, single-process limiter) rather than marketing the prototype |
 
 ## Quality gates applied
 
-- **Tests:** full suite after every stage; nothing committed red. 14/14 green at HEAD.
+- **Tests:** full suite after every stage; nothing committed red. 20/20 green at HEAD.
+- **CI:** pytest and ruff run on every push (`.github/workflows/ci.yml`), so
+  these gates are enforced rather than self-reported.
+- **Live verification:** the console was driven in a real browser — create flow,
+  all seven checks, QR rendering, and responsive behavior at 375px and 1280px —
+  not just asserted through `TestClient`.
 - **Review:** every AI diff read before commit; deliberate shortcuts marked
   in-code with `ponytail:` comments naming the ceiling and upgrade path.
 - **Security:** parameterized SQL only; `secrets` RNG; scheme allowlist;
@@ -61,3 +73,8 @@ documentation drafting.
 **Least:** scoping decisions. "What does 'abuse' mean here" and "what is
 honest to leave out" were engineering-judgment calls AI could enumerate
 options for but not own.
+
+**Most instructive:** the clobbered `/health` handler. AI edits fail in ways
+that stay syntactically valid and keep the test suite green — the failure mode
+is silent, not loud. That is the concrete argument for engineer review of every
+diff, and the reason the review step is a gate here rather than a formality.

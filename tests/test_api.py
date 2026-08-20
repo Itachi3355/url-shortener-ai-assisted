@@ -112,3 +112,39 @@ def test_rate_limit_window_slides():
     assert not ratelimit.allow("1.2.3.4", now=100.0)
     assert ratelimit.allow("1.2.3.4", now=100.0 + ratelimit.WINDOW + 1)
     assert ratelimit.allow("5.6.7.8", now=100.0)  # per-IP isolation
+
+
+def test_console_page_served(client):
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "LinkDesk" in r.text
+
+
+def test_list_links_includes_click_counts(client):
+    code = client.post("/api/shorten", json={"url": "https://example.com"}).json()["code"]
+    client.get(f"/{code}", follow_redirects=False)
+    links = client.get("/api/links").json()["links"]
+    assert len(links) == 1
+    assert links[0]["code"] == code and links[0]["clicks"] == 1
+
+
+def test_qr_returns_svg(client):
+    code = client.post("/api/shorten", json={"url": "https://example.com"}).json()["code"]
+    r = client.get(f"/api/links/{code}/qr")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("image/svg+xml")
+    assert r.text.lstrip().startswith("<?xml") or "<svg" in r.text
+
+
+def test_qr_unknown_code_404(client):
+    assert client.get("/api/links/nope123/qr").status_code == 404
+
+
+def test_request_id_header_present(client):
+    r = client.get("/health")
+    assert len(r.headers["x-request-id"]) == 12
+
+
+def test_request_id_echoed_when_supplied(client):
+    r = client.get("/health", headers={"X-Request-ID": "trace-abc-123"})
+    assert r.headers["x-request-id"] == "trace-abc-123"

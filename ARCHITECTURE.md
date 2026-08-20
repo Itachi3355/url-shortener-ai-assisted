@@ -3,16 +3,26 @@
 ## Components
 
 ```
-client ──▶ FastAPI (app/main.py)
+browser ──▶ app/static/index.html   LinkDesk console (no build step, no framework)
+   │              calls the same public API a third-party client would
+   ▼
+client ──▶ RequestLogMiddleware      request ID, JSON access log, duration
+              │
+           FastAPI (app/main.py)
               │  routes, request/response models, HTTP semantics
-              ├─ app/shortener.py   code generation, URL/alias validation
-              ├─ app/ratelimit.py   per-IP sliding window (in-memory)
-              └─ app/db.py          SQLite persistence (stdlib sqlite3, WAL)
+              ├─ app/shortener.py    code generation, URL/alias validation
+              ├─ app/ratelimit.py    per-IP sliding window (in-memory)
+              ├─ app/logging_mw.py   correlation IDs + structured logging
+              └─ app/db.py           SQLite persistence (stdlib sqlite3, WAL)
                      │
                  shortener.db
                    links(code PK, url, created_at, expires_at)
                    clicks(id, code FK→links ON DELETE CASCADE, ts, referrer)
 ```
+
+The console is a *client*, not a layer: it holds no state and has no privileged
+endpoint. Everything it does is a documented public API call, so the demo cannot
+drift from what the API actually offers.
 
 Control flow, create: `POST /api/shorten` → rate-limit check → URL validation →
 alias validation or base62 generation → insert (PK collision = retry or 409) →
@@ -33,6 +43,10 @@ Control flow, redirect: `GET /{code}` → lookup → expiry check → record cli
 | Analytics write | Sync insert on redirect | ~1ms on SQLite; correctness first, marked with upgrade path | Background queue — premature at prototype scale |
 | Rate limiter | In-memory sliding window deque | Correct within one process, testable with injected clock; honest `ponytail:` marker points to Redis | Redis (new infra dependency for a prototype), fixed window (burst-at-boundary artifact) |
 | Expiry | Lazy check on read | No background job needed; expired rows are invisible immediately | Cron sweeper — adds a moving part; can be added later purely for storage hygiene |
+| Console UI | One static HTML file, vanilla JS | Reviewer clones and opens a browser — no npm install, no build, nothing to go stale. Keeps the API as the only contract | React/Vite SPA — a build pipeline and 200MB of dependencies to demonstrate four endpoints |
+| QR generation | `segno`, rendered as SVG on demand | Pure-Python, no system libraries (Pillow/libz would break "clone and run" on some machines); SVG scales and stays crisp | Pillow PNG (binary dependency), client-side JS library (another script to vendor) |
+| Access logging | JSON lines to stdout, one per request | Aggregators index fields directly; stdout is the correct sink for a container | Formatted text logs (need regex parsing), log file on disk (rotation becomes my problem) |
+| Correlation ID | Honor inbound `X-Request-ID`, else generate | A trace ID from an upstream gateway survives into these logs instead of restarting at the edge | Always generate — silently breaks distributed tracing |
 
 ## Scaling path (not built, by design)
 
