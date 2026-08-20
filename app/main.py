@@ -73,7 +73,13 @@ def health():
 def shorten(body: ShortenRequest, request: Request):
     ip = request.client.host if request.client else "unknown"
     if not ratelimit.allow(ip):
-        raise HTTPException(429, "Rate limit exceeded: 10 links per minute")
+        wait = ratelimit.retry_after(ip)
+        # RFC 6585: a 429 SHOULD tell the client when to come back.
+        raise HTTPException(
+            429,
+            f"Rate limit exceeded: {ratelimit.LIMIT} links per minute. Try again in {wait}s.",
+            headers={"Retry-After": str(wait)},
+        )
     err = shortener.validate_url(body.url)
     if err:
         raise HTTPException(422, err)

@@ -76,6 +76,23 @@ On Windows PowerShell use `curl.exe` (bare `curl` is an alias for
 Errors: `422` invalid URL/alias, `409` alias taken, `429` rate limited
 (10 creates/min/IP), `404` unknown or expired.
 
+A `429` carries a `Retry-After` header saying how many seconds until the next
+request is allowed, per RFC 6585. The console reads it and counts down rather
+than guessing.
+
+### Hitting the rate limit while demoing
+
+Expected — the **Rate limit engages** check deliberately spends the whole
+minute's budget, so link creation is blocked for ~60s afterwards. Run it last.
+To clear it immediately, restart the server (the limiter is in-memory), or give
+the demo more headroom:
+
+```bash
+RATE_LIMIT_PER_MIN=100 uvicorn app.main:app --reload
+```
+
+On PowerShell: `$env:RATE_LIMIT_PER_MIN=100; uvicorn app.main:app --reload`
+
 Every response carries an `X-Request-ID` header. Supply your own to trace a
 request end to end; otherwise one is generated.
 

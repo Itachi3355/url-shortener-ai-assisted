@@ -40,6 +40,8 @@ recording scope and rationale.
 | QR library choice | AI suggested Pillow-based generation | **Rejected → `segno`.** Pillow pulls binary dependencies that break "clone and run"; segno is pure Python and emits SVG |
 | Structured logging middleware | AI generated to my spec | **Edited:** the draft always generated a request ID. Changed to honor an inbound `X-Request-ID` first — always generating silently breaks upstream tracing |
 | CI workflow | AI generated | **Accepted.** Added specifically so the "quality gates" claim in this document is enforced by CI rather than asserted in prose |
+| `Retry-After` on 429 | Gap found by me while demoing, not by tests | The suite asserted the 429 status and stopped there. Using the product showed the response was unusable to a client — RFC 6585 says a 429 SHOULD say when to retry. AI implemented `retry_after()`; I specified computing it from the oldest request in the sliding window rather than returning a flat 60 |
+| Rate limit as env var | Mine | A hardcoded limit forces a code change to run a demo. `RATE_LIMIT_PER_MIN` is the one value here that genuinely differs per environment, so it is the one value that became config |
 | Docs (README/ARCHITECTURE/SCENARIOS) | AI drafted | **Reviewed for honesty** — limitations section states real gaps (DNS-rebinding SSRF, single-process limiter) rather than marketing the prototype |
 
 ## Quality gates applied

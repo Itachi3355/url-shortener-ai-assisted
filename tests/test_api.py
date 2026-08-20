@@ -148,3 +148,27 @@ def test_request_id_header_present(client):
 def test_request_id_echoed_when_supplied(client):
     r = client.get("/health", headers={"X-Request-ID": "trace-abc-123"})
     assert r.headers["x-request-id"] == "trace-abc-123"
+
+
+def test_rate_limit_sends_retry_after(client):
+    for _ in range(ratelimit.LIMIT):
+        client.post("/api/shorten", json={"url": "https://example.com"})
+    r = client.post("/api/shorten", json={"url": "https://example.com"})
+    assert r.status_code == 429
+    wait = int(r.headers["retry-after"])
+    assert 1 <= wait <= 60
+    assert "Try again in" in r.json()["detail"]
+
+
+def test_retry_after_zero_when_under_limit():
+    ratelimit.reset()
+    ratelimit.allow("9.9.9.9", now=100.0)
+    assert ratelimit.retry_after("9.9.9.9", now=100.0) == 0
+
+
+def test_retry_after_counts_down_with_window():
+    ratelimit.reset()
+    for _ in range(ratelimit.LIMIT):
+        ratelimit.allow("8.8.8.8", now=100.0)
+    assert ratelimit.retry_after("8.8.8.8", now=100.0) == 60
+    assert ratelimit.retry_after("8.8.8.8", now=145.0) == 15

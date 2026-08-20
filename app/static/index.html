@@ -185,6 +185,7 @@ $('create').onclick = async () => {
   if ($('ttl').value) body.ttl_days = +$('ttl').value;
   const r = await api('/api/shorten', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
   const j = await r.json();
+  if (r.status === 429) { startCooldown(+r.headers.get('Retry-After') || 60); return; }
   if (!r.ok) { $('formerr').textContent = (j.detail && j.detail[0]?.msg) || j.detail || `Error ${r.status}`; return; }
   lastShort = j;
   $('shorta').textContent = j.short_url; $('shorta').href = j.short_url;
@@ -193,6 +194,28 @@ $('create').onclick = async () => {
   $('result').classList.add('show');
   loadLinks();
 };
+/* 429 is the rate limiter doing its job, not a failure — say so, and count down
+   using the server's Retry-After rather than guessing. */
+let cooldownTimer = null;
+function startCooldown(secs){
+  clearInterval(cooldownTimer);
+  const btn = $('create'), err = $('formerr');
+  btn.disabled = true; btn.style.opacity = .55;
+  const tick = () => {
+    if (secs <= 0){
+      clearInterval(cooldownTimer);
+      btn.disabled = false; btn.style.opacity = 1;
+      err.textContent = ''; err.style.color = 'var(--red)';
+      return;
+    }
+    err.style.color = 'var(--amber)';
+    err.textContent = `Rate limit reached — this is the 10/min guard working. Creating again in ${secs}s.`;
+    secs--;
+  };
+  tick();
+  cooldownTimer = setInterval(tick, 1000);
+}
+
 $('copy').onclick = async () => { await navigator.clipboard.writeText(lastShort.short_url); $('copy').textContent='Copied ✓'; setTimeout(()=>$('copy').textContent='Copy link',1500); };
 $('visit').onclick = () => { window.open(lastShort.short_url,'_blank'); setTimeout(loadLinks,600); };
 
@@ -250,7 +273,8 @@ const CHECKS = [
     why:'Missing or expired links return not-found, never a broken redirect.',
     run:()=>api('/definitely-not-a-code',{redirect:'manual'}) },
   { name:'Rate limit engages', expect:429,
-    why:'Fires 11 create requests; the 11th must be throttled (10/min/IP sliding window).',
+    why:'Fires 11 create requests; the 11th must be throttled (10/min/IP sliding window). Run this last — it spends the whole minute\'s budget, so creating links is blocked for ~60s afterwards. That is the guard working, not a fault.',
+    spendsBudget:true,
     run:async()=>{ let r; for(let i=0;i<11;i++){ r=await api('/api/shorten',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:'https://example.com/flood'})}); if(r.status===429) return r; } return r; } },
 ];
 
@@ -278,6 +302,7 @@ async function runCheck(i){
     let bodyTxt=''; try{ bodyTxt = JSON.stringify(await r.json()); }catch(e){ bodyTxt = r.type==='opaqueredirect'?'(redirect followed by browser — status hidden by fetch, verified via manual mode)':'(no body)'; }
     out.textContent = `HTTP ${r.type==='opaqueredirect'?'3xx (redirect)':status}\n${bodyTxt}`;
     out.classList.add('show');
+    if (c.spendsBudget && status===429) startCooldown(+r.headers.get('Retry-After') || 60);
   }catch(e){
     chip.className='chip fail'; chip.textContent='FAIL · '+e.message;
   }

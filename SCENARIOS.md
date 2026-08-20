@@ -95,6 +95,16 @@ safety.
 422; window-slide + per-IP isolation via injected clock (no sleeps in the
 suite). Full suite: 14 green.
 
+**Follow-up, from using the thing.** Demoing the console surfaced two gaps the
+tests could not: the `429` carried no `Retry-After` header (RFC 6585 says it
+SHOULD — without it a client can only guess when to retry), and the limit was
+hardcoded, so a demo and a public deployment could not differ without a code
+change. Both fixed: `retry_after()` computes the wait from the oldest request in
+the sliding window, and `RATE_LIMIT_PER_MIN` sets the ceiling per environment.
+The console now shows a live countdown that names the guard instead of a bare
+error, because a security control that reads as a fault gets removed by whoever
+maintains it next.
+
 ---
 
 ## Scenario 4 — Brownfield, second increment: demo console + reliability
