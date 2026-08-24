@@ -229,17 +229,35 @@
 
 <script>
 const $ = id => document.getElementById(id);
-const api = (path, opts) => fetch(path, opts);
+
+/* fetch() rejects outright on network failure — server stopped, connection
+   refused, offline — which is a different thing from an HTTP error status and
+   surfaces as a bare "Failed to fetch". Translate it once, here, so no call
+   site has to, and flip the header badge: a page that still claims "API
+   healthy" while every click fails is worse than no badge at all. */
+const api = async (path, opts) => {
+  try {
+    return await fetch(path, opts);
+  } catch {
+    setHealth(false);
+    throw new Error('Cannot reach the server — check that it is still running');
+  }
+};
+
+function setHealth(ok, limit){
+  $('hdot').className = 'dot ' + (ok ? 'ok' : 'bad');
+  $('htext').textContent = ok ? 'API healthy' : 'API unreachable';
+  if (ok && limit) serverLimit = limit;
+}
 
 /* ---------- health ----------
    /health also reports the configured rate limit, so the console never has to
    guess a value the server owns. */
 let serverLimit = 10;
 api('/health').then(r=>r.json()).then(h=>{
-  $('hdot').className='dot ok'; $('htext').textContent='API healthy';
-  if (h.rate_limit_per_min) serverLimit = h.rate_limit_per_min;
+  setHealth(true, h.rate_limit_per_min);
   renderChecks();
-}).catch(()=>{ $('hdot').className='dot bad'; $('htext').textContent='API unreachable'; });
+}).catch(()=> setHealth(false));
 
 /* ---------- create ---------- */
 /* FastAPI sends `detail` as a string for our own errors and as a list of
@@ -257,25 +275,42 @@ $('create').onclick = async () => {
   const body = { url: $('url').value.trim() };
   if ($('alias').value.trim()) body.alias = $('alias').value.trim();
   if ($('ttl').value) body.ttl_days = +$('ttl').value;
-  const r = await api('/api/shorten', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  let r;
+  // A browser takes seconds to give up on an unreachable host, so acknowledge
+  // the click straight away or it reads as ignored.
+  const btn = $('create'), label = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Shortening…';
+  const restore = () => {
+    btn.textContent = label;
+    if (!cooldownActive) btn.disabled = false;   // a 429 owns the button instead
+  };
+  try {
+    r = await api('/api/shorten', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  } catch (e) {
+    $('formerr').textContent = e.message;   // network failure, never a response
+    restore();
+    return;
+  }
   // An error body is not always JSON — FastAPI's own 500 is text/plain and a
   // proxy 502 is HTML — so parsing must not be able to kill this handler.
   let j = null;
   try { j = await r.json(); } catch { /* leave j null; status still drives the branch */ }
-  if (r.status === 429) { startCooldown(+r.headers.get('Retry-After') || 60, detailOf(j)); return; }
-  if (!r.ok) { $('formerr').textContent = detailOf(j) || `Error ${r.status}`; return; }
+  if (r.status === 429) { startCooldown(+r.headers.get('Retry-After') || 60, detailOf(j)); restore(); return; }
+  if (!r.ok) { $('formerr').textContent = detailOf(j) || `Error ${r.status}`; restore(); return; }
   lastShort = j;
   $('shorta').textContent = j.short_url; $('shorta').href = j.short_url;
   $('dest').textContent = '→ ' + j.url + (j.expires_at ? `  ·  expires ${j.expires_at} UTC` : '');
   $('qr').src = `/api/links/${j.code}/qr`;
   $('result').classList.add('show');
+  restore();
   loadLinks();
 };
 /* 429 is the rate limiter doing its job, not a failure — say so, and count down
    using the server's Retry-After rather than guessing. */
-let cooldownTimer = null;
+let cooldownTimer = null, cooldownActive = false;
 function startCooldown(secs, serverDetail){
   clearInterval(cooldownTimer);
+  cooldownActive = true;
   // The server names the real limit; the console must not hardcode one, since
   // RATE_LIMIT_PER_MIN can change it. Drop the server's own static "try again
   // in Ns" tail because the live countdown below replaces it.
@@ -286,6 +321,7 @@ function startCooldown(secs, serverDetail){
   const tick = () => {
     if (secs <= 0){
       clearInterval(cooldownTimer);
+      cooldownActive = false;
       btn.disabled = false; btn.style.opacity = 1;
       err.textContent = ''; err.style.color = 'var(--red)';
       return;
@@ -333,7 +369,7 @@ $('visit').onclick = () => { window.open(lastShort.short_url,'_blank'); setTimeo
    success shape, so reading fields off it without checking status throws deep
    inside the caller instead of surfacing the actual error. */
 async function getJSON(path, opts){
-  const r = await fetch(path, opts);
+  const r = await api(path, opts);   // network failures arrive already translated
   if (!r.ok){
     let detail = null;
     try { detail = (await r.json()).detail; } catch { /* no JSON body */ }
