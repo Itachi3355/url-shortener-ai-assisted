@@ -40,7 +40,7 @@ every endpoint against the live server:
 | `javascript:` URL blocked | `422` | Scheme allowlist blocks script payloads |
 | Private IP target blocked | `422` | Won't mask links into internal infrastructure |
 | Unknown code is 404 | `404` | No broken redirects for missing/expired links |
-| Rate limit engages | `429` | 11th create in a minute is throttled |
+| Rate limit engages | `429` | One create past the configured limit is throttled |
 
 ## Quick demo (CLI equivalent)
 
@@ -86,7 +86,8 @@ than guessing.
 Expected — the **Rate limit engages** check deliberately spends the whole
 minute's budget, so link creation is blocked for ~60s afterwards. Run it last.
 To clear it immediately, restart the server (the limiter is in-memory), or give
-the demo more headroom:
+the demo more headroom. Above 25/min the check reports SKIPPED rather than
+running a long burst that would bury the link table:
 
 ```bash
 RATE_LIMIT_PER_MIN=100 uvicorn app.main:app --reload
@@ -116,7 +117,7 @@ upstream trace ID survives into these logs.
 python -m pytest tests/ -q
 ```
 
-25 tests: happy paths, alias collisions, invalid inputs, expiry, delete cascade,
+28 tests: happy paths, alias collisions, invalid inputs, expiry, delete cascade,
 rate-limit window behavior and `Retry-After`, private-IP rejection, QR
 generation, request-ID propagation, and the error-body contract the console
 depends on. Each test runs against a fresh temp database.

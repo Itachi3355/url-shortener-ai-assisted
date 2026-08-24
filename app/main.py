@@ -66,7 +66,9 @@ def qr(code: str, request: Request):
 @app.get("/health")
 def health():
     db.get_conn().execute("SELECT 1")
-    return {"status": "ok"}
+    # The configured limit is reported so clients need not assume a value the
+    # server owns and an operator can change.
+    return {"status": "ok", "rate_limit_per_min": ratelimit.LIMIT}
 
 
 @app.post("/api/shorten", response_model=ShortenResponse, status_code=201)

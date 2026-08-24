@@ -66,7 +66,10 @@ def test_expired_link_404(client):
 
 
 def test_health(client):
-    assert client.get("/health").json() == {"status": "ok"}
+    body = client.get("/health").json()
+    assert body["status"] == "ok"
+    # The console sizes its rate-limit check from this, so it must be reported.
+    assert body["rate_limit_per_min"] == ratelimit.LIMIT
 
 
 def test_stats_counts_clicks_and_referrers(client):
@@ -188,3 +191,34 @@ def test_url_with_html_metacharacters_round_trips(client):
     hostile = 'https://example.com/x"><img src=x onerror=alert(1)>'
     assert client.post("/api/shorten", json={"url": hostile}).status_code == 201
     assert client.get("/api/links").json()["links"][0]["url"] == hostile
+
+
+def test_retry_after_zero_once_window_has_elapsed():
+    """Must agree with allow(): a full window later, nothing is owed."""
+    ratelimit.reset()
+    for _ in range(ratelimit.LIMIT):
+        ratelimit.allow("7.7.7.7", now=100.0)
+    assert ratelimit.retry_after("7.7.7.7", now=100.0 + ratelimit.WINDOW + 5) == 0
+
+
+def test_limit_env_var_is_validated(monkeypatch):
+    """A bad value must name the variable, and a non-positive one must not
+    silently block every request."""
+    monkeypatch.setenv("RATE_LIMIT_PER_MIN", "100/min")
+    with pytest.raises(ValueError, match="RATE_LIMIT_PER_MIN"):
+        ratelimit._parse_limit()
+    for bad in ("0", "-5"):
+        monkeypatch.setenv("RATE_LIMIT_PER_MIN", bad)
+        assert ratelimit._parse_limit() == 1
+    monkeypatch.setenv("RATE_LIMIT_PER_MIN", "  25  ")
+    assert ratelimit._parse_limit() == 25
+
+
+def test_throttled_request_never_500s(client, monkeypatch):
+    """A limit of 1 leaves the window at exactly LIMIT: retry_after must not
+    index past the end of it."""
+    monkeypatch.setattr(ratelimit, "LIMIT", 1)
+    assert client.post("/api/shorten", json={"url": "https://example.com"}).status_code == 201
+    r = client.post("/api/shorten", json={"url": "https://example.com"})
+    assert r.status_code == 429
+    assert int(r.headers["retry-after"]) >= 1

@@ -231,11 +231,26 @@
 const $ = id => document.getElementById(id);
 const api = (path, opts) => fetch(path, opts);
 
-/* ---------- health ---------- */
-api('/health').then(r=>r.json()).then(()=>{ $('hdot').className='dot ok'; $('htext').textContent='API healthy'; })
-  .catch(()=>{ $('hdot').className='dot bad'; $('htext').textContent='API unreachable'; });
+/* ---------- health ----------
+   /health also reports the configured rate limit, so the console never has to
+   guess a value the server owns. */
+let serverLimit = 10;
+api('/health').then(r=>r.json()).then(h=>{
+  $('hdot').className='dot ok'; $('htext').textContent='API healthy';
+  if (h.rate_limit_per_min) serverLimit = h.rate_limit_per_min;
+  renderChecks();
+}).catch(()=>{ $('hdot').className='dot bad'; $('htext').textContent='API unreachable'; });
 
 /* ---------- create ---------- */
+/* FastAPI sends `detail` as a string for our own errors and as a list of
+   objects for schema validation failures. Handle both, and anything else. */
+function detailOf(body){
+  const d = body && body.detail;
+  if (typeof d === 'string') return d;
+  if (Array.isArray(d)) return d[0]?.msg || null;
+  return null;
+}
+
 let lastShort = null;
 $('create').onclick = async () => {
   $('formerr').textContent='';
@@ -243,9 +258,12 @@ $('create').onclick = async () => {
   if ($('alias').value.trim()) body.alias = $('alias').value.trim();
   if ($('ttl').value) body.ttl_days = +$('ttl').value;
   const r = await api('/api/shorten', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-  const j = await r.json();
-  if (r.status === 429) { startCooldown(+r.headers.get('Retry-After') || 60); return; }
-  if (!r.ok) { $('formerr').textContent = (j.detail && j.detail[0]?.msg) || j.detail || `Error ${r.status}`; return; }
+  // An error body is not always JSON — FastAPI's own 500 is text/plain and a
+  // proxy 502 is HTML — so parsing must not be able to kill this handler.
+  let j = null;
+  try { j = await r.json(); } catch { /* leave j null; status still drives the branch */ }
+  if (r.status === 429) { startCooldown(+r.headers.get('Retry-After') || 60, detailOf(j)); return; }
+  if (!r.ok) { $('formerr').textContent = detailOf(j) || `Error ${r.status}`; return; }
   lastShort = j;
   $('shorta').textContent = j.short_url; $('shorta').href = j.short_url;
   $('dest').textContent = '→ ' + j.url + (j.expires_at ? `  ·  expires ${j.expires_at} UTC` : '');
@@ -256,8 +274,13 @@ $('create').onclick = async () => {
 /* 429 is the rate limiter doing its job, not a failure — say so, and count down
    using the server's Retry-After rather than guessing. */
 let cooldownTimer = null;
-function startCooldown(secs){
+function startCooldown(secs, serverDetail){
   clearInterval(cooldownTimer);
+  // The server names the real limit; the console must not hardcode one, since
+  // RATE_LIMIT_PER_MIN can change it. Drop the server's own static "try again
+  // in Ns" tail because the live countdown below replaces it.
+  const reason = (serverDetail || 'Rate limit reached')
+    .replace(/\s*Try again in \d+s\.?\s*$/i, '').replace(/[.\s]+$/, '');
   const btn = $('create'), err = $('formerr');
   btn.disabled = true; btn.style.opacity = .55;
   const tick = () => {
@@ -268,14 +291,41 @@ function startCooldown(secs){
       return;
     }
     err.style.color = 'var(--amber)';
-    err.textContent = `Rate limit reached — this is the 10/min guard working. Creating again in ${secs}s.`;
+    err.textContent = `${reason} — the guard is working. Creating again in ${secs}s.`;
     secs--;
   };
   tick();
   cooldownTimer = setInterval(tick, 1000);
 }
 
-$('copy').onclick = async () => { await navigator.clipboard.writeText(lastShort.short_url); $('copy').textContent='Copied ✓'; setTimeout(()=>$('copy').textContent='Copy link',1500); };
+/* navigator.clipboard exists only in a secure context, so it is undefined when
+   someone opens the console over plain http on a LAN address. Fall back to a
+   selection-based copy, and never leave the click without feedback. */
+async function copyText(text){
+  try {
+    if (window.isSecureContext && navigator.clipboard){
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch { /* fall through to the selection path */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly','');
+    ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  } catch { return false; }
+}
+
+$('copy').onclick = async () => {
+  const ok = await copyText(lastShort.short_url);
+  $('copy').textContent = ok ? 'Copied ✓' : 'Copy failed — select the link';
+  setTimeout(()=>$('copy').textContent='Copy link', ok ? 1500 : 2600);
+};
 $('visit').onclick = () => { window.open(lastShort.short_url,'_blank'); setTimeout(loadLinks,600); };
 
 /* ---------- shared response handling ----------
@@ -294,7 +344,13 @@ async function getJSON(path, opts){
 
 /* Destinations are attacker-controlled text rendered into the table. The
    scheme allowlist stops javascript: URLs but not quotes or angle brackets in
-   a path, so escape before interpolating. */
+   a path, so escape before interpolating.
+
+   This is HTML escaping and is only valid in HTML text and attribute values.
+   It does NOT make a value safe inside a JS string in an inline handler: the
+   parser turns &#39; back into a quote before the JS is compiled. Row actions
+   therefore carry their code in data-* and are bound below, so no untrusted
+   value ever reaches a JavaScript parsing context. */
 const esc = s => String(s).replace(/[&<>"']/g, c => (
   {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
@@ -320,13 +376,23 @@ async function loadLinks(){
         <td class="c-url"><span class="url" title="${esc(l.url)}">${esc(l.url)}</span></td>
         <td class="c-clicks clicks" data-label="clicks">${l.clicks}</td>
         <td class="c-exp" data-label="expires">${l.expires_at ? esc(l.expires_at.slice(0,10)) : '—'}</td>
-        <td class="c-act"><button class="btn ghost" onclick="showStats('${esc(l.code)}', this)">Stats</button>
-            <button class="btn ghost" onclick="delLink('${esc(l.code)}')">Delete</button></td>
+        <td class="c-act"><button class="btn ghost" data-act="stats" data-code="${esc(l.code)}">Stats</button>
+            <button class="btn ghost" data-act="del" data-code="${esc(l.code)}">Delete</button></td>
       </tr>`).join('') : EMPTY_ROW;
   } catch (e) {
     tb.innerHTML = `<tr><td colspan="5" class="empty">Could not load links — ${esc(e.message)}</td></tr>`;
   }
 }
+
+/* Bound once by delegation: the tbody is replaced on every refresh, so
+   per-button listeners would need re-attaching, and inline handlers would put
+   the code into a JS parsing context. */
+$('rows').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-act]');
+  if (!btn) return;
+  if (btn.dataset.act === 'stats') showStats(btn.dataset.code, btn);
+  else delLink(btn.dataset.code);
+});
 
 /* Stats expand directly beneath their own row — a panel elsewhere on the page
    makes the reader work out which link it belongs to. */
@@ -371,9 +437,11 @@ async function showStats(code, btn){
       `<div class="detail-top"><b>/${esc(code)}</b><span>${s.total_clicks} total click${s.total_clicks===1?'':'s'}</span></div>`
       + statsPanel(s);
   } catch (e) {
-    detail.querySelector('.detail-body').innerHTML =
-      `<div class="detail-err">${esc(e.message)}</div>`;
-    loadLinks();   // the row was stale; refresh so it disappears
+    // The row is stale, so it has to be refreshed away — but that replaces the
+    // tbody, taking this detail row with it. Report above the table, which
+    // survives the re-render, or the message would vanish in the same tick.
+    showMessage(`<b>/${esc(code)}</b> — ${esc(e.message)}`, true);
+    await loadLinks();
   }
 }
 
@@ -412,24 +480,42 @@ const CHECKS = [
     why:'Missing or expired links return not-found, never a broken redirect.',
     run:()=>api('/definitely-not-a-code',{redirect:'manual'}) },
   { name:'Rate limit engages', expect:429,
-    why:'Fires 11 create requests; the 11th must be throttled (10/min/IP sliding window). Run this last — it spends the whole minute\'s budget, so creating links is blocked for ~60s afterwards. That is the guard working, not a fault.',
+    why:()=>`Fires ${serverLimit + 1} create requests; the last must be throttled (${serverLimit}/min/IP sliding window). Run this last — it spends the whole minute's budget, so creating links is blocked for ~60s afterwards. That is the guard working, not a fault.`,
     spendsBudget:true,
-    run:async()=>{ let r; for(let i=0;i<11;i++){ r=await api('/api/shorten',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:'https://example.com/flood'})}); if(r.status===429) return r; } return r; } },
+    // A limit raised for demoing (see README) would need a long burst and would
+    // bury the table in junk links, so say so rather than reporting a failure
+    // the server has not actually committed.
+    skipIf:()=> serverLimit > 25
+      ? `limit is ${serverLimit}/min — restart without RATE_LIMIT_PER_MIN to exercise this in one click`
+      : null,
+    run:async()=>{ let r; for(let i=0;i<serverLimit+1;i++){ r=await api('/api/shorten',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:'https://example.com/flood'})}); if(r.status===429) return r; } return r; } },
 ];
 
-$('checks').innerHTML = CHECKS.map((c,i)=>`
-  <div class="check">
-    <div class="top">
-      <span class="name">${c.name}</span>
-      <span class="chip expect" id="chip${i}">expect ${c.expect}</span>
-      <button class="btn ghost" id="run${i}">Run</button>
-    </div>
-    <div class="why">${c.why}</div>
-    <div class="out" id="out${i}"></div>
-  </div>`).join('');
+/* Re-rendered once /health reports the real limit, so the wording matches the
+   server rather than a value baked in at author time. */
+function renderChecks(){
+  $('checks').innerHTML = CHECKS.map((c,i)=>`
+    <div class="check">
+      <div class="top">
+        <span class="name">${c.name}</span>
+        <span class="chip expect" id="chip${i}">expect ${c.expect}</span>
+        <button class="btn ghost" id="run${i}">Run</button>
+      </div>
+      <div class="why">${typeof c.why === 'function' ? c.why() : c.why}</div>
+      <div class="out" id="out${i}"></div>
+    </div>`).join('');
+  CHECKS.forEach((c,i)=> $('run'+i).onclick = ()=>runCheck(i));
+}
 
 async function runCheck(i){
   const c = CHECKS[i], chip = $('chip'+i), out = $('out'+i);
+  const skip = c.skipIf && c.skipIf();
+  if (skip){
+    chip.className='chip expect'; chip.textContent='SKIPPED';
+    out.textContent = `Not run — ${skip}`;
+    out.classList.add('show');
+    return;
+  }
   chip.className='chip expect'; chip.textContent='running…';
   try{
     const r = await c.run();
@@ -441,13 +527,16 @@ async function runCheck(i){
     let bodyTxt=''; try{ bodyTxt = JSON.stringify(await r.json()); }catch(e){ bodyTxt = r.type==='opaqueredirect'?'(redirect followed by browser — status hidden by fetch, verified via manual mode)':'(no body)'; }
     out.textContent = `HTTP ${r.type==='opaqueredirect'?'3xx (redirect)':status}\n${bodyTxt}`;
     out.classList.add('show');
-    if (c.spendsBudget && status===429) startCooldown(+r.headers.get('Retry-After') || 60);
+    if (c.spendsBudget && status===429){
+      let detail=null; try{ detail = detailOf(JSON.parse(bodyTxt)); }catch{ /* not JSON */ }
+      startCooldown(+r.headers.get('Retry-After') || 60, detail);
+    }
   }catch(e){
     chip.className='chip fail'; chip.textContent='FAIL · '+e.message;
   }
   loadLinks();
 }
-CHECKS.forEach((c,i)=> $('run'+i).onclick = ()=>runCheck(i));
+renderChecks();
 $('runall').onclick = async ()=>{ for(let i=0;i<CHECKS.length;i++) await runCheck(i); };
 </script>
 </body>
