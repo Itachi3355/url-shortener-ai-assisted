@@ -1,4 +1,4 @@
-# URL Shortener — AI-Assisted Engineering Assignment
+# URL Shortener — AI-Assisted Engineering
 
 A URL shortener with core APIs, click analytics, and abuse controls, built as a
 demonstration of AI-assisted engineering execution. The engineering process —
